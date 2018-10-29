@@ -54,13 +54,13 @@ The factors are modeled as random walks where the covariance matrix $\mathbf{Q}$
 
 ```{r load_pkgs_1, message=FALSE}
 library(MARSS)
-library(MASS)
 installed.packages()["MARSS", "Version"]
 ```
 
 In addition, we also make use of the `mvrnorm()` function in the __MASS__ package, color palettes in the __viridis__ package, and the `corrplot()` function from the __corrplot__ package. 
 
 ```{r load_pkgs_2, message=FALSE, eval=FALSE}
+library(MASS)
 library(viridis)
 library(corrplot)
 ```
@@ -106,6 +106,22 @@ diag(ZZ) <- rev(sort(abs(diag(ZZ))))
 ZZ[upper.tri(ZZ)] <- 0
 ZZ <- round(ZZ, 2)
 ```
+
+## Simulated covariates
+
+The goal here is to determine whether or not the order of inclusion of covariates into the DFA model affects the estimation of their true effect size. I will create two of them: a linear trend and cyclical period.
+
+```{r sim_covars}
+## linear trend
+dd1 <- seq(TT)/10 - mean(seq(TT)/10)
+## sinusoid
+dd2 <- sin(2*pi*seq(TT)/TT)
+## combined
+dd <- rbind(dd1, dd2)
+```
+
+## Covariate effects
+
 
 ## Observed time series
 
