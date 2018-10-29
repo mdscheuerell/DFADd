@@ -1,0 +1,233 @@
+---
+title: "Examination of covariate effects in Dynamic Factor Analysis"
+output:
+  html_document:
+    theme: cerulean
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    fig_caption: yes
+csl: index.csl
+bibliography: index.bib
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(tensorflow.one_based_extract = TRUE)
+```
+
+<br/>
+
+[__Mark D. Scheuerell__](https://faculty.washington.edu/scheuerl/)  
+_Northwest Fisheries Science Center, National Oceanic and Atmospheric Administration, Seattle, WA USA_
+
+***
+
+__DISCLAIMER__  
+
+This vignette is still in the testing and evaluating phase and should not be considered complete or error-free.
+
+This is version `r paste0('0.',format(Sys.time(), '%y.%m.%d'))`.
+
+***
+
+# Background
+
+Dynamic Factor Analysis (DFA) is a dimension reduction technique specific to time series analysis. The general idea is to model $N$ time series as a linear combination of $M$ "hidden", time-varying factors, where $M \ll N$. For an $N \times T$ matrix of data $\mathbf{y}$, where $\mathbf{y}_t$ is an $N \times 1$ column vector, the DFA model is
+
+$$
+\mathbf{y}_t \sim \text{MVN}(\mathbf{Z} \mathbf{x}_t + \mathbf{a},\mathbf{R})
+$$
+$$
+\mathbf{x}_t \sim \text{MVN}(\mathbf{x}_{t-1},\mathbf{Q})
+$$
+$$
+\mathbf{x}_0 \sim \text{MVN}(\mathbf{0},\mathbf{Q}_0)
+$$
+
+The $N \times M$ matrix $\mathbf{Z}$ maps the factors onto the observed data at time $t$. The $N \times 1$ vector $\mathbf{a}$ contains offsets for each of the observed time series. The covariance matrix $\mathbf{R}$ of the observation errors can be anything from simple IID errors (i.e., same variance parameter down the diagonal ans zeroes elsewhere), to something much more complex like an unconstrained block diagonal.
+
+The factors are modeled as random walks where the covariance matrix $\mathbf{Q}$ of the process errors governing their evolution is generally assumed to be an $M \times M$ identity matrix, $\mathbf{I}_M$. The covariance matrix $\mathbf{Q}_0$ of the initial states $\mathbf{x}_0$ is typically assumed to have large values along the diagonal and zeros elsewhere.
+
+# Requirements
+
+```{r load_pkgs_1, message=FALSE}
+library(MARSS)
+library(MASS)
+installed.packages()["MARSS", "Version"]
+```
+
+In addition, we also make use of the `mvrnorm()` function in the __MASS__ package, color palettes in the __viridis__ package, and the `corrplot()` function from the __corrplot__ package. 
+
+```{r load_pkgs_2, message=FALSE, eval=FALSE}
+library(viridis)
+library(corrplot)
+```
+
+# Simulate data
+
+I'll use 15 time series that are 30 units long, each of which is a linear combination of 3 different latent trends.
+
+```{r data_inits}
+NN <- 15
+TT <- 30
+MM <- 3
+```
+
+## Latent factors
+
+In a DFA model, the rows in the matrix of latent factors $\mathbf{x}$ are generally assumed to be independent random walks, each of which is a cumulative sum of a sequence of independent process errors.
+
+```{r sim_factors, message=FALSE}
+set.seed(123)
+## MM x TT matrix of innovations
+ww <- matrix(rnorm(MM*TT, 0, 1), MM, TT)
+ww[,1] <- rnorm(MM, 0, sqrt(5))
+## MM x TT matrix of scaled latent trends
+xx <- t(scale(apply(ww,1,cumsum)))
+```
+
+```{r plot_factors, fig.height=4, fig.width=7, echo=FALSE}
+## plot the trends
+par(mai=c(0.8,0.8,0.2,0.2))
+matplot(t(xx), type="b", lty="solid", cex=0.7,
+        xlab="Time", ylab=expression(italic(x)[italic(t)]),
+        col=plasma(MM, end=0.8))
+```
+
+## Loadings matrix
+
+The matrix $\mathbf{Z}$ maps the factors $\mathbf{x}$ onto the observations $\mathbf{y}$. We draw each of the sub-diagonal elements from a Uniform(-1,1); the diagonal elements are drawn from a Uniform(0,1). We also sort the diagonal elements from largest to smallest.
+
+```{r create_Z}
+ZZ <- matrix(runif(NN*MM, -1, 1), NN, MM)
+diag(ZZ) <- rev(sort(abs(diag(ZZ))))
+ZZ[upper.tri(ZZ)] <- 0
+ZZ <- round(ZZ, 2)
+```
+
+## Observed time series
+
+Now we can use the loadings and some observation errors to create the observed time series. Here we assume that the errors are IID, and their standard deviation is 0.2. We can ignore the additive effect of the offset vector $\mathbf{a}$ because the expectations of $\mathbf{x}$ and $\mathbf{e}$ are both zero.
+
+```{r create_ts}
+## obs var
+obs_var <- 0.2^2
+## obs errors
+ee <- t(mvrnorm(TT, matrix(0,NN,1), diag(obs_var,NN,NN)))
+## NN x TT matrix of observed data
+yy <- ZZ %*% xx + ee
+```
+
+```{r plot_ts, fig.height=4, fig.width=7, echo=FALSE}
+par(mai=c(0.8,0.8,0.2,0.2))
+matplot(t(yy), type="l", lty="solid",
+        xlab="Time", ylab=expression(italic(y)[italic(i)]),
+        col=plasma(NN, alpha=0.7, end=0.8))
+```
+
+It's hard to tell from this plot how many of the `r NN` time series are correlated. Here is a plot of the correlation coefficients for all of the pairwise comparisons with them clustered by similarity. 
+
+```{r hist_cor_coefs, fig.height=7, fig.width=7, echo=FALSE}
+rho <- cor(t(yy))
+par(mai=c(0.8,0.8,0.2,0.2))
+corrplot(rho, method="ellipse", type="lower", order = "hclust",
+         tl.col = "black", tl.srt = 0, tl.cex = 0.6, tl.offset = 0.7,
+         cl.cex = 0.8, cl.offset = 0.9, cl.ratio = 0.1)
+```
+
+# Parameter estimation
+
+Before we can estimate the model parameters we need to specify distributions for the priors and likelihoods.
+
+
+### Factor rotation
+
+Recall that we constrained $\mathbf{Z}$ in such a way as to choose only one of many possible solutions, but fortunately they are equivalent and can be related to each other by a rotation matrix. Let $\mathbf{H}$ be any $m \times m$ non-singular matrix.  The following are then equivalent DFA models:
+
+$$
+\begin{gathered}
+ \mathbf{y}_t \sim \text{MVN}(\mathbf{Z} \mathbf{x}_t, \mathbf{R}) \\
+ \mathbf{x}_t \sim \text{MVN}(\mathbf{x}_{t-1},\mathbf{Q})
+\end{gathered}   
+$$
+
+and
+
+$$
+\begin{gathered}
+ \mathbf{y}_t \sim \text{MVN}(\mathbf{Z} \mathbf{H}^{-1} \mathbf{x}_t, \mathbf{R}) \\
+ \mathbf{H}\mathbf{x}_t \sim \text{MVN}(\mathbf{H}\mathbf{x}_{t-1},\mathbf{Q})
+\end{gathered}   
+$$
+
+There are many ways of doing factor rotations, but a common method is the "varimax"" rotation, which seeks a rotation matrix $\mathbf{H}$ that creates the largest difference between the loadings in $\mathbf{Z}$.
+ 
+The varimax rotation is easy to compute because R has a built in function for this: `varimax()`. Interestingly, the function returns the inverse of $\mathbf{H}$, which we need anyway.  
+
+```{r get_ZZ_rot, eval=FALSE}
+## rotation matrix
+HH_inv <- varimax(ZZ_fit)$rotmat
+## rotated Z
+ZZ_rot <- ZZ_fit %*% HH_inv
+round(ZZ_rot, 2)
+```
+
+## Factors
+
+Here are the `r MM` factors in $\mathbf{x}$. The top panel has the true factors; the bottom panel shows the estimated factors. Note that there is no way to insure that the specific ordering of the estimated factors will match the true factors.
+
+```{r get_factors, eval=FALSE}
+## fitted factors
+xx_fit <- par_means[grepl("xx",rownames(mod_smry$statistics))]
+xx_fit <- matrix(xx_fit, MM, TT, byrow=FALSE)
+```
+
+```{r plot_xx_fits, fig.height=7, fig.width=7, echo=FALSE, eval=FALSE}
+par(mfrow=c(2,1), mai=c(0.8,0.8,0.2,0.2))
+matplot(t(xx), type="b", lty="solid", cex=0.7,
+        xlab="", ylab=expression(italic(x)[italic(t)]),
+        col=plasma(MM, end=0.8))
+mtext("True", 3, adj = 0)
+matplot(t(xx_fit), type="b", lty="solid", cex=0.7,
+        xlab="Time", ylab=expression(italic(x)[italic(t)]),
+        col=viridis(MM, end=0.8))
+mtext("Fitted", 3, adj = 0)
+```
+
+Here is a graphical representation of the pairwise correlation between the factors.
+
+```{r corrplot_xx, fig.height=6, fig.width=6, eval=FALSE}
+par(mai=rep(0.1, 4), omi=rep(0.1, 4))
+corrplot(cor(t(xx), t(xx_fit)), method="ellipse",
+         tl.col = "black", tl.srt = 0, tl.cex = 0.8, tl.offset = 0.7,
+         cl.cex = 0.8, cl.offset = 0.9, cl.ratio = 0.2)
+```
+
+## Covariance matrix
+
+Here is an estimate of the SD of the observation errors (recall that the true value is `r sqrt(obs_var)`).
+
+```{r get_RR_fit, eval=FALSE}
+round(par_means[grepl("RR",rownames(mod_smry$statistics))], 3)
+```
+
+## Fitted vs observed
+
+Here is a graphical representation of the correlation between the observed and fitted data for the `r NN` time series. Note that their (row, col) ordering is arbitrary.
+
+```{r cor_yy, eval=FALSE}
+## fitted values
+yy_fit <- ZZ_fit %*% xx_fit
+## corrrelation
+cor_yy <- matrix(diag(cor(t(yy_z), t(yy_fit))), NN/5, 5)
+## plots
+par(mai=rep(0.1, 4), omi=rep(0.1, 4))
+corrplot(cor_yy, method="ellipse",
+         tl.pos = "n",
+         cl.cex = 0.8, cl.offset = 0.9,
+         cl.ratio = 0.2) #cl.lim = c(0, 1))
+```
+
+# References
