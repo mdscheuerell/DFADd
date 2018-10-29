@@ -7,8 +7,6 @@ output:
     toc_float: true
     toc_depth: 3
     fig_caption: yes
-csl: index.csl
-bibliography: index.bib
 ---
 
 
@@ -59,7 +57,7 @@ installed.packages()["MARSS", "Version"]
 
 In addition, we also make use of the `mvrnorm()` function in the __MASS__ package, color palettes in the __viridis__ package, and the `corrplot()` function from the __corrplot__ package. 
 
-```{r load_pkgs_2, message=FALSE, eval=FALSE}
+```{r load_pkgs_2, message=FALSE}
 library(MASS)
 library(viridis)
 library(corrplot)
@@ -109,7 +107,7 @@ ZZ <- round(ZZ, 2)
 
 ## Simulated covariates
 
-The goal here is to determine whether or not the order of inclusion of covariates into the DFA model affects the estimation of their true effect size. I will create two of them: a linear trend and cyclical period.
+The goal here is to determine whether or not the order of inclusion of covariates into the DFA model affects the estimation of their true effect size. I will create two of them: a linear trend and sinusoidal cycle.
 
 ```{r sim_covars}
 ## linear trend
@@ -120,12 +118,23 @@ dd2 <- sin(2*pi*seq(TT)/TT)
 dd <- rbind(dd1, dd2)
 ```
 
+Although not immediately obvious, they are inversely correlated with $\rho$ = `r round(cor(dd1,dd2),2)`.
+
 ## Covariate effects
 
+To begin, I'll assume that each covariate has the same effect on each of the observed time series.
+
+```{r sim_covar_effects}
+## linear effect
+D1 <- 0.2
+## periodic effect
+D2 <- 0.4
+DD <- cbind(rep(D1,NN),rep(D2,NN))
+```
 
 ## Observed time series
 
-Now we can use the loadings and some observation errors to create the observed time series. Here we assume that the errors are IID, and their standard deviation is 0.2. We can ignore the additive effect of the offset vector $\mathbf{a}$ because the expectations of $\mathbf{x}$ and $\mathbf{e}$ are both zero.
+Here I assume that the observation errors are IID, and their standard deviation is 0.2. I will ignore any additive effect of the offset vector ($i.e., \mathbf{a} = \mathbf{0}$) and subtract the mean of $\mathbf{y}$ so as not to estimate $\mathbf{a}$ below.
 
 ```{r create_ts}
 ## obs var
@@ -133,7 +142,8 @@ obs_var <- 0.2^2
 ## obs errors
 ee <- t(mvrnorm(TT, matrix(0,NN,1), diag(obs_var,NN,NN)))
 ## NN x TT matrix of observed data
-yy <- ZZ %*% xx + ee
+yy <- ZZ %*% xx + DD %*% dd + ee
+yy <- yy - apply(yy, 1, mean)
 ```
 
 ```{r plot_ts, fig.height=4, fig.width=7, echo=FALSE}
@@ -155,7 +165,6 @@ corrplot(rho, method="ellipse", type="lower", order = "hclust",
 
 # Parameter estimation
 
-Before we can estimate the model parameters we need to specify distributions for the priors and likelihoods.
 
 
 ### Factor rotation
@@ -246,4 +255,3 @@ corrplot(cor_yy, method="ellipse",
          cl.ratio = 0.2) #cl.lim = c(0, 1))
 ```
 
-# References
