@@ -128,7 +128,7 @@ To begin, I'll assume that each covariate has the same effect on each of the obs
 ## linear effect
 D1 <- 0.5
 ## periodic effect
-D2 <- 0
+D2 <- 0.5
 DD <- cbind(rep(D1,NN),rep(D2,NN))
 ```
 
@@ -136,14 +136,16 @@ DD <- cbind(rep(D1,NN),rep(D2,NN))
 
 Here I assume that the observation errors are IID, and their standard deviation is 0.2. I will ignore any additive effect of the offset vector ($i.e., \mathbf{a} = \mathbf{0}$) and subtract the mean of $\mathbf{y}$ so as not to estimate $\mathbf{a}$ below.
 
+For now I ignore the covariate effects and add them in later.
+
 ```{r create_ts}
 ## obs var
-obs_var <- 0.2^2
+obs_var <- 0.2
 ## obs errors
 ee <- t(mvrnorm(TT, matrix(0,NN,1), diag(obs_var,NN,NN)))
 ## NN x TT matrix of observed data
-yy <- ZZ %*% xx + DD %*% dd + ee
-#yy <- yy - apply(yy, 1, mean)
+yy <- ZZ %*% xx + ee
+yy <- yy - apply(yy, 1, mean)
 ```
 
 ```{r plot_ts, fig.height=4, fig.width=7, echo=FALSE}
@@ -169,27 +171,43 @@ First I fit a regulation linear regression model, simply to estimate the effects
 
 ## Linear trend only
 
-```{r define_D_est}
-DD_est <- matrix(rep("D1",NN), NN, 1)
+```{r define_D1_est}
+## define estimated D
+D1_est <- matrix(rep("D1",NN), NN, 1)
+## add linear effect to y
+y_lin <- yy + DD[,1] %*% dd[1,,drop=FALSE] 
 ```
 
-
-```{r fit_lm}
+```{r fit_lm_1}
 lm_mlist <- list(
   x0 = matrix(0,2,1),
-  B = diag(2),
+  B = "identity",
   U = "zero",
   Q = "zero",
   Z = matrix(0,NN,2),
   A = "zero",
   R = "diagonal and equal",
-  D = DD_est,
-  d = dd[1,],
+  D = D1_est,
+  d = dd[1, ,drop=FALSE],
   tinitx=1
 )
-lm_fit <- MARSS(yy, model=lm_mlist)
+lm_lin <- MARSS(yy, model=lm_mlist)
 ```
 
+## Cyclic pattern only
+
+```{r define_D2_est}
+## define estimated D
+D2_est <- matrix(rep("D2",NN), NN, 1)
+## add linear effect to y
+y_sin <- yy + DD[,2] %*% dd[2,,drop=FALSE] 
+```
+
+```{r fit_lm_2}
+lm_mlist$d <- dd[2, ,drop=FALSE]
+lm_mlist$D <- D2_est
+lm_sin <- MARSS(yy, model=lm_mlist)
+```
 
 ### Factor rotation
 
