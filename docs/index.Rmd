@@ -173,7 +173,7 @@ First I fit a regulation linear regression model, simply to estimate the effects
 
 ```{r define_D1_est}
 ## define estimated D
-D1_est <- matrix(rep("D1",NN), NN, 1)
+D1_est <- matrix(rep("lin",NN), NN, 1)
 ## add linear effect to y
 y_lin <- yy + DD[,1] %*% dd[1,,drop=FALSE] 
 ```
@@ -198,7 +198,7 @@ lm_lin <- MARSS(yy, model=lm_mlist)
 
 ```{r define_D2_est}
 ## define estimated D
-D2_est <- matrix(rep("D2",NN), NN, 1)
+D2_est <- matrix(rep("sin",NN), NN, 1)
 ## add linear effect to y
 y_sin <- yy + DD[,2] %*% dd[2,,drop=FALSE] 
 ```
@@ -208,6 +208,44 @@ lm_mlist$d <- dd[2, ,drop=FALSE]
 lm_mlist$D <- D2_est
 lm_sin <- MARSS(yy, model=lm_mlist)
 ```
+
+## DFA models
+
+### 3 trends
+
+Here I fit a DFA model with 3 trends and no covariate effects to the original series $\mathbf{y}$.
+
+```{r fit_DFA_base, cache=TRUE}
+dfa_list <- list(m = 3, R = "diagonal and equal", tinitx=1)
+dfa_base <- MARSS(yy, model=dfa_list, form="dfa",
+               demean=FALSE, z.score=FALSE,
+               method="BFGS",
+               control=list(maxit=2000))
+```
+
+### 4 trends; linear
+
+Now I fit a DFA model with 4 trends and no covariate effects to the observations with a linear trend (i.e., one of the latent trends should appear straight).
+
+```{r fit_DFA_lin, cache=TRUE}
+dfa_list$m = 4
+dfa_lin <- MARSS(y_lin, model=dfa_list, form="dfa",
+               demean=FALSE, z.score=FALSE,
+               method="BFGS",
+               control=list(maxit=2000))
+```
+
+### 4 trends; sine
+
+And lastly I fit a DFA model with 4 trends and no covariate effects to the observations with a sinusoid (i.e., one of the latent trends should appear sinusoidal).
+
+```{r fit_DFA_sin, cache=TRUE}
+dfa_sin <- MARSS(y_sin, model=dfa_list, form="dfa",
+               demean=FALSE, z.score=FALSE,
+               method="BFGS",
+               control=list(maxit=2000))
+```
+
 
 ### Factor rotation
 
